@@ -5,49 +5,69 @@ const express = require('express')
 const bodyParser = require('body-parser')
 const ejs = require('ejs')
 const mongoose = require('mongoose')
-const md5 = require('md5');
-
 const app = express()
+const passport = require('passport')
+const session = require('express-session')
+const passportLocalMongoose = require('passport-local-mongoose')
 
 app.set('view engine', 'ejs')
 app.use(express.static('public'))
 app.use(bodyParser.urlencoded({extended: true}))
 
-mongoose.connect('mongodb://localhost:27017/userDB', {useNewUrlParser: true, useUnifiedTopology: true})
+app.use(session({
+    secret: 'My very own secret.',
+    resave: false,
+    saveUninitialized: false
+}))
+
+app.use(passport.initialize());
+app.use(passport.session());
+
+mongoose.connect('mongodb+srv://admin-shawn:passmore@cluster0.hqjap.mongodb.net/userDB', {useNewUrlParser: true, useUnifiedTopology: true})
+mongoose.set('useCreateIndex', true)
 
 const userSchema = new mongoose.Schema({
     email: String, 
     password: String
 })
 
+userSchema.plugin(passportLocalMongoose)
+
 const User = new mongoose.model('User', userSchema)
 
-app.post('/register', (req, res) => {
-    const newUser = new User({
-        email: req.body.email,
-        password: md5(req.body.password)
-    })
+// CHANGE: USE "createStrategy" INSTEAD OF "authenticate"
+passport.use(User.createStrategy());
 
-    newUser.save(err => {
-        if (err) {
+passport.serializeUser(User.serializeUser());
+passport.deserializeUser(User.deserializeUser());
+
+app.post('/register', (req, res) => {
+    User.register({username: req.body.username}, req.body.password, (err, user) => {
+        if(err) {
             console.log(err);
+            res.redirect('/register')
         } else {
-            res.render('secrets')
+            passport.authenticate('local')(req, res, function() {
+                res.redirect('/secrets');
+            })
         }
     })
+        
 })
 
 app.post('/login', (req, res) => {
-    User.findOne({email: req.body.email}, (err, foundUser) => {
-        if (err) {
-            console.log(err);
+    const user = new User({
+        username: req.body.username,
+        password: req.body.password
+    })
+
+    req.login(user, err => {
+        if(err) {
+            console.log(err)
         } else {
-            if (foundUser) {
-                if (foundUser.password === md5(req.body.password)) {
-                    res.render('secrets')
-                    console.log('Successfully Logged In');
-                }
-            }
+            passport.authenticate('local')(req, res, function() {
+                res.redirect('/secrets');
+            })
         }
     })
 })
@@ -56,12 +76,25 @@ app.get('/', (req, res) => {
     res.render('home')
 })
 
+app.get('/secrets', (req, res) => {
+    if(req.isAuthenticated()) {
+        res.render('secrets')
+    } else {
+        res.redirect('/login')
+    }
+})
+
 app.get('/register', (req, res) => {
     res.render('register')
 })
 
 app.get('/login', (req, res) => {
     res.render('login')
+})
+
+app.get('/logout', (req, res) => {
+    req.logout();
+    res.redirect('/');
 })
 
 app.listen(3000, () => {
